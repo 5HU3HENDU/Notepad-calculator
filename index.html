@@ -84,7 +84,8 @@
     <p class="help">
       Type anything. Lines with maths show answers automatically.<br>
       <code>rent = 12000</code> sets a variable, then <code>rent * 12</code> uses it.<br>
-      A line with just <code>total</code> adds up every number above it (not counting earlier totals).<br>
+      A line with just <code>total</code> adds up the block since the previous total.<br>
+      A line like <code>Rent 12000</code> also sets <code>rent</code> as a variable you can use later.<br>
       <code>150 + 10%</code> works, and so do ₹, commas and brackets.<br>
       Lines starting with <code>#</code> are plain notes and never calculate.
     </p>
@@ -257,6 +258,7 @@ function recompute() {
     var trimmed = line.trim();
     var value = null;
     var isTotal = false;
+    var labelName = null;
     var isComment = /^#/.test(trimmed) || /^\/\//.test(trimmed);
     row.classList.toggle("comment", isComment);
     if (!isComment && trimmed !== "") {
@@ -277,6 +279,7 @@ function recompute() {
       } else {
         var label = /^([A-Za-z][A-Za-z ]*?)\s+(\d.*)$/.exec(trimmed);
         var exprPart = null;
+        if (label) { labelName = label[1].trim(); }
         if (label) {
           exprPart = label[2].replace(/\b([A-Za-z_][A-Za-z0-9_]*)\b/g, function (m, name) {
             var v = vars[name.toLowerCase()];
@@ -304,9 +307,9 @@ function recompute() {
     }
     if (value !== null) {
       res.textContent = "= " + fmt(value, line.indexOf("₹") !== -1);
-      if (!isTotal) values.push(value);
-      else values.push(0);
-      if (isTotal) values[values.length - 1] = 0;
+      if (labelName && labelName.indexOf(" ") === -1) vars[labelName.toLowerCase()] = value;
+      if (isTotal) { values = []; }
+      else { values.push(value); }
     } else {
       res.textContent = "";
     }
