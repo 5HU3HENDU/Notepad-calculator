@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#3d5a35">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<title>Notepad Calculator</title>
+<style>
+  :root {
+    --bg: #f7f4ec; --paper: #fffdf8; --ink: #22271f; --muted: #6a7263;
+    --line: #e2dccb; --accent: #3d5a35; --answer: #3d7a3d;
+  }
+  body.dark {
+    --bg: #191c19; --paper: #242824; --ink: #e8e6df; --muted: #9aa093;
+    --line: #3a403a; --accent: #8fbf7f; --answer: #8fbf7f;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.6;
+  }
+  .wrap { width: min(94vw, 640px); margin: 0 auto; padding: 20px 0 64px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  header h1 { font-family: Georgia, serif; font-size: 28px; }
+  .gear {
+    font-size: 24px; background: var(--paper); border: 1px solid var(--line);
+    border-radius: 12px; padding: 6px 12px; cursor: pointer; color: var(--ink);
+  }
+  .panel {
+    background: var(--paper); border: 1px solid var(--line); border-radius: 16px;
+    padding: 16px 18px; margin: 14px 0; font-size: 15px;
+  }
+  .panel h2 { font-size: 16px; margin-bottom: 8px; }
+  .panel label { display: block; padding: 4px 0; cursor: pointer; }
+  .panel .btnrow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .btn {
+    background: var(--accent); color: #fff; border: none; border-radius: 999px;
+    padding: 10px 18px; font-size: 15px; cursor: pointer;
+  }
+  .btn.secondary { background: var(--paper); color: var(--accent); border: 1px solid var(--accent); }
+  .btn.danger { background: var(--paper); color: #b03a2e; border: 1px solid #b03a2e; }
+  .help { color: var(--muted); font-size: 14px; margin-top: 12px; }
+  .help code { background: var(--bg); padding: 1px 6px; border-radius: 6px; }
+  #emptyhint { text-align: center; color: var(--muted); padding: 24px 12px; font-size: 15px; }
+  #lines { margin-top: 8px; }
+  .row { padding: 3px 0; }
+  .txt { outline: none; min-height: 1.6em; word-wrap: break-word; white-space: pre-wrap; font-size: 17px; }
+  .res { color: var(--answer); font-weight: 700; white-space: nowrap; font-size: 17px; }
+  .row.comment .txt { color: var(--muted); font-style: italic; }
+  #lines.col .row { display: flex; align-items: flex-start; gap: 8px; }
+  #lines.col .txt { flex: 1; }
+  #lines.col .res { text-align: right; min-width: 96px; }
+  #lines.inline .txt { display: inline-block; max-width: 100%; }
+  #lines.inline .res { display: inline-block; margin-left: 10px; }
+  .addline {
+    display: block; width: 100%; text-align: left; background: none; border: none;
+    color: var(--muted); font-size: 15px; padding: 10px 0; cursor: pointer;
+  }
+  footer { text-align: center; font-size: 13px; color: var(--muted); margin-top: 28px; padding: 0 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🧮 Notepad Calculator</h1>
+    <button type="button" class="gear" id="gear" aria-label="Settings">⚙️</button>
+  </header>
+
+  <div class="panel" id="settings" style="display:none">
+    <h2>Settings</h2>
+    <label><input type="radio" name="respos" value="inline"> Results at end of line</label>
+    <label><input type="radio" name="respos" value="col"> Results in right column</label>
+    <label><input type="radio" name="theme" value="light"> Light theme</label>
+    <label><input type="radio" name="theme" value="dark"> Dark theme</label>
+    <div class="btnrow">
+      <button type="button" class="btn secondary" id="exportBtn">Export .txt</button>
+      <button type="button" class="btn secondary" id="importBtn">Import .txt</button>
+      <button type="button" class="btn secondary" id="copyBtn">Copy with results</button>
+      <button type="button" class="btn danger" id="clearBtn">Clear note</button>
+      <input type="file" id="importFile" accept=".txt,text/plain" style="display:none">
+    </div>
+    <p class="help">
+      Type anything. Lines with maths show answers automatically.<br>
+      <code>rent = 12000</code> sets a variable, then <code>rent * 12</code> uses it.<br>
+      A line with just <code>total</code> adds up every number above it (not counting earlier totals).<br>
+      <code>150 + 10%</code> works, and so do ₹, commas and brackets.<br>
+      Lines starting with <code>#</code> are plain notes and never calculate.
+    </p>
+  </div>
+
+  <div id="emptyhint" style="display:none">Start typing. Lines with maths will show answers as you type.</div>
+  <div id="lines" class="inline"></div>
+  <button type="button" class="addline" id="addline">＋ New line</button>
+
+  <footer>
+    Saved automatically on this phone · Works offline · No account, nothing leaves the phone<br>
+    <span id="linecount"></span>
+  </footer>
+</div>
+
+<script>
+var LS_NOTE = "notepadCalcNote";
+var LS_SETTINGS = "notepadCalcSettings";
+var linesEl = document.getElementById("lines");
+
+/* ---------- Settings ---------- */
+var settings = { pos: "inline", theme: "light" };
+try {
+  var s = JSON.parse(localStorage.getItem(LS_SETTINGS) || "null");
+  if (s) { if (s.pos) settings.pos = s.pos; if (s.theme) settings.theme = s.theme; }
+} catch (e) {}
+function saveSettings() {
+  localStorage.setItem(LS_SETTINGS, JSON.stringify(settings));
+  applySettings();
+}
+function applySettings() {
+  document.body.classList.toggle("dark", settings.theme === "dark");
+  linesEl.className = settings.pos;
+  document.querySelectorAll('input[name="respos"]').forEach(function (r) { r.checked = (r.value === settings.pos); });
+  document.querySelectorAll('input[name="theme"]').forEach(function (r) { r.checked = (r.value === settings.theme); });
+  document.querySelector('meta[name="theme-color"]').setAttribute("content", settings.theme === "dark" ? "#191c19" : "#3d5a35");
+}
+document.getElementById("gear").addEventListener("click", function () {
+  var p = document.getElementById("settings");
+  p.style.display = (p.style.display === "none") ? "block" : "none";
+});
+document.querySelectorAll('input[name="respos"]').forEach(function (r) {
+  r.addEventListener("change", function () { settings.pos = r.value; saveSettings(); });
+});
+document.querySelectorAll('input[name="theme"]').forEach(function (r) {
+  r.addEventListener("change", function () { settings.theme = r.value; saveSettings(); });
+});
+
+/* ---------- Rows ---------- */
+function createRow(text) {
+  var row = document.createElement("div");
+  row.className = "row";
+  var txt = document.createElement("div");
+  txt.className = "txt";
+  txt.contentEditable = "true";
+  txt.spellcheck = false;
+  txt.textContent = text;
+  var res = document.createElement("div");
+  res.className = "res";
+  row.appendChild(txt);
+  row.appendChild(res);
+  return row;
+}
+function getRows() { return Array.prototype.slice.call(linesEl.querySelectorAll(".row")); }
+function getLines() {
+  return getRows().map(function (row) { return row.querySelector(".txt").textContent; });
+}
+function setNote(lines) {
+  linesEl.innerHTML = "";
+  if (!lines.length) lines = [""];
+  lines.forEach(function (t) { linesEl.appendChild(createRow(t)); });
+  recompute();
+}
+function focusRow(row, offset) {
+  var txt = row.querySelector(".txt");
+  txt.focus();
+  var sel = window.getSelection();
+  var range = document.createRange();
+  var node = txt.firstChild;
+  if (!node) { range.setStart(txt, 0); }
+  else { range.setStart(node, Math.max(0, Math.min(offset, node.length))); }
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+function caretOffset(txt) {
+  var sel = window.getSelection();
+  if (!sel.rangeCount) return 0;
+  var range = sel.getRangeAt(0);
+  if (range.startContainer === txt) return range.startOffset;
+  if (range.startContainer.nodeType === 3) return range.startOffset;
+  return txt.textContent.length;
+}
+
+/* ---------- Safe maths ---------- */
+function parseExpr(str) {
+  var i = 0;
+  function peek() { return str[i]; }
+  function parseE() {
+    var v = parseT();
+    while (peek() === "+" || peek() === "-") {
+      var op = peek(); i++;
+      var r = parseT();
+      v = (op === "+") ? v + r : v - r;
+    }
+    return v;
+  }
+  function parseT() {
+    var v = parseF();
+    while (peek() === "*" || peek() === "/") {
+      var op = peek(); i++;
+      var r = parseF();
+      v = (op === "*") ? v * r : v / r;
+    }
+    return v;
+  }
+  function parseF() {
+    var neg = false;
+    if (peek() === "+") { i++; }
+    else if (peek() === "-") { i++; neg = true; }
+    var v;
+    if (peek() === "(") {
+      i++;
+      v = parseE();
+      if (peek() === ")") { i++; } else { throw new Error("bad"); }
+    } else {
+      var m = /^[0-9]*\.?[0-9]+/.exec(str.slice(i));
+      if (!m) { throw new Error("bad"); }
+      i += m[0].length;
+      v = parseFloat(m[0]);
+    }
+    while (peek() === "%") { i++; v = v / 100; }
+    return neg ? -v : v;
+  }
+  var v = parseE();
+  if (i !== str.length) { throw new Error("bad"); }
+  return v;
+}
+function evalClean(expr) {
+  expr = expr.replace(/,/g, "").replace(/[₹$]/g, "").replace(/\s+/g, "");
+  expr = expr.replace(/(\d)\s*[x×]\s*(\d)/g, "$1*$2");
+  var pct = /^(.+)([\+\-])([0-9]+(?:\.[0-9]+)?)%$/.exec(expr);
+  if (pct) {
+    var base = evalClean(pct[1]);
+    if (base === null) return null;
+    var p = parseFloat(pct[3]);
+    return pct[2] === "+" ? base + base * p / 100 : base - base * p / 100;
+  }
+  if (!/^[0-9\.\+\-\*\/\%\(\)]+$/.test(expr) || !/[0-9]/.test(expr)) return null;
+  try {
+    var v = parseExpr(expr);
+    if (!isFinite(v)) return null;
+    return Math.round(v * 1e10) / 1e10;
+  } catch (e) { return null; }
+}
+function fmt(v, rupee) {
+  var s = v.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  return (rupee ? "₹" : "") + s;
+}
+
+/* ---------- Line evaluation ---------- */
+function recompute() {
+  var vars = {};
+  var values = [];
+  var rows = getRows();
+  rows.forEach(function (row) {
+    var txt = row.querySelector(".txt");
+    var res = row.querySelector(".res");
+    var line = txt.textContent;
+    var trimmed = line.trim();
+    var value = null;
+    var isTotal = false;
+    var isComment = /^#/.test(trimmed) || /^\/\//.test(trimmed);
+    row.classList.toggle("comment", isComment);
+    if (!isComment && trimmed !== "") {
+      var rupee = line.indexOf("₹") !== -1;
+      var assign = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/.exec(trimmed);
+      if (assign) {
+        var rhs = assign[2].replace(/\b([A-Za-z_][A-Za-z0-9_]*)\b/g, function (m, name) {
+          var v = vars[name.toLowerCase()];
+          return (v === undefined) ? m : String(v);
+        });
+        value = evalClean(rhs);
+        if (value !== null) vars[assign[1].toLowerCase()] = value;
+      } else if (/^(total|sum)$/i.test(trimmed)) {
+        value = values.reduce(function (a, b) { return a + b; }, 0);
+        isTotal = true;
+      } else if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(trimmed) && vars[trimmed.toLowerCase()] !== undefined) {
+        value = vars[trimmed.toLowerCase()];
+      } else {
+        var label = /^([A-Za-z][A-Za-z ]*?)\s+(\d.*)$/.exec(trimmed);
+        var exprPart = null;
+        if (label) {
+          exprPart = label[2].replace(/\b([A-Za-z_][A-Za-z0-9_]*)\b/g, function (m, name) {
+            var v = vars[name.toLowerCase()];
+            return (v === undefined) ? m : String(v);
+          });
+        } else {
+          exprPart = trimmed.replace(/\b([A-Za-z_][A-Za-z0-9_]*)\b/g, function (m, name) {
+            var v = vars[name.toLowerCase()];
+            return (v === undefined) ? m : String(v);
+          });
+        }
+        var cut = exprPart.search(/[A-Za-z#]/);
+        if (label && cut !== -1) exprPart = exprPart.slice(0, cut);
+        if (!label && /[A-Za-z]/.test(exprPart)) { exprPart = ""; }
+        if (exprPart !== "") {
+          var fromDigit = exprPart.search(/\d/);
+          if (fromDigit !== -1) {
+            exprPart = exprPart.slice(fromDigit);
+            var cut2 = exprPart.search(/[A-Za-z#]/);
+            if (cut2 !== -1) exprPart = exprPart.slice(0, cut2);
+            value = evalClean(exprPart);
+          }
+        }
+      }
+    }
+    if (value !== null) {
+      res.textContent = "= " + fmt(value, line.indexOf("₹") !== -1);
+      if (!isTotal) values.push(value);
+      else values.push(0);
+      if (isTotal) values[values.length - 1] = 0;
+    } else {
+      res.textContent = "";
+    }
+  });
+  var lines = getLines();
+  var nonEmpty = lines.filter(function (t) { return t.trim() !== ""; }).length;
+  document.getElementById("emptyhint").style.display = (nonEmpty === 0) ? "block" : "none";
+  document.getElementById("linecount").textContent = lines.length + " lines";
+}
+
+/* ---------- Save / load ---------- */
+var saveTimer = null;
+function saveSoon() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(function () {
+    localStorage.setItem(LS_NOTE, JSON.stringify(getLines()));
+  }, 250);
+}
+function loadNote() {
+  try {
+    var saved = JSON.parse(localStorage.getItem(LS_NOTE) || "null");
+    if (saved && saved.length) { setNote(saved); return; }
+  } catch (e) {}
+  setNote([
+    "# Notepad Calculator - type anything, maths solves itself",
+    "# Plain words are just notes",
+    "Rent 12000",
+    "Groceries 4500",
+    "Transport 2000",
+    "total",
+    "# Variables: name = value, then use the name",
+    "months = 12",
+    "rent * months",
+    "# Percentages work too",
+    "12000 + 10%"
+  ]);
+}
+
+/* ---------- Editing ---------- */
+linesEl.addEventListener("input", function () { recompute(); saveSoon(); });
+linesEl.addEventListener("keydown", function (e) {
+  var txt = e.target;
+  if (!txt.classList || !txt.classList.contains("txt")) return;
+  var row = txt.parentNode;
+  var rows = getRows();
+  var idx = rows.indexOf(row);
+  if (e.key === "Enter") {
+    e.preventDefault();
+    var off = caretOffset(txt);
+    var full = txt.textContent;
+    txt.textContent = full.slice(0, off);
+    var newRow = createRow(full.slice(off));
+    linesEl.insertBefore(newRow, row.nextSibling);
+    focusRow(newRow, 0);
+    recompute(); saveSoon();
+  } else if (e.key === "Backspace" && caretOffset(txt) === 0 && idx > 0) {
+    e.preventDefault();
+    var prev = rows[idx - 1];
+    var prevTxt = prev.querySelector(".txt");
+    var at = prevTxt.textContent.length;
+    prevTxt.textContent = prevTxt.textContent + txt.textContent;
+    row.remove();
+    focusRow(prev, at);
+    recompute(); saveSoon();
+  } else if (e.key === "ArrowUp" && idx > 0) {
+    e.preventDefault();
+    focusRow(rows[idx - 1], caretOffset(txt));
+  } else if (e.key === "ArrowDown" && idx < rows.length - 1) {
+    e.preventDefault();
+    focusRow(rows[idx + 1], caretOffset(txt));
+  }
+});
+linesEl.addEventListener("paste", function (e) {
+  var txt = e.target;
+  if (!txt.classList || !txt.classList.contains("txt")) return;
+  e.preventDefault();
+  var text = (e.clipboardData || window.clipboardData).getData("text") || "";
+  var parts = text.split(/\r?\n/);
+  var off = caretOffset(txt);
+  var full = txt.textContent;
+  var before = full.slice(0, off);
+  var after = full.slice(off);
+  txt.textContent = before + parts[0];
+  var current = txt.parentNode;
+  for (var i = 1; i < parts.length; i++) {
+    var nr = createRow(i === parts.length - 1 ? parts[i] + after : parts[i]);
+    linesEl.insertBefore(nr, current.nextSibling);
+    current = nr;
+  }
+  if (parts.length === 1) txt.textContent = before + parts[0] + after;
+  focusRow(current, current === txt.parentNode ? (before + parts[0]).length : parts[parts.length - 1].length);
+  recompute(); saveSoon();
+});
+linesEl.addEventListener("click", function (e) {
+  if (e.target === linesEl) {
+    var rows = getRows();
+    var last = rows[rows.length - 1];
+    focusRow(last, last.querySelector(".txt").textContent.length);
+  }
+});
+document.getElementById("addline").addEventListener("click", function () {
+  var nr = createRow("");
+  linesEl.appendChild(nr);
+  focusRow(nr, 0);
+});
+
+/* ---------- Export / import / copy / clear ---------- */
+function noteWithResults() {
+  var rows = getRows();
+  return rows.map(function (row) {
+    var t = row.querySelector(".txt").textContent;
+    var r = row.querySelector(".res").textContent;
+    if (r && t.trim() !== "" && !/^#/.test(t.trim())) return t + " " + r;
+    return t;
+  }).join("\n");
+}
+function download(filename, text) {
+  var blob = new Blob([text], { type: "text/plain" });
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+}
+document.getElementById("exportBtn").addEventListener("click", function () {
+  download("notepad-calculator.txt", noteWithResults());
+});
+document.getElementById("importBtn").addEventListener("click", function () {
+  document.getElementById("importFile").click();
+});
+document.getElementById("importFile").addEventListener("change", function (e) {
+  var file = e.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function () {
+    var text = String(reader.result || "");
+    if (getLines().filter(function (t) { return t.trim() !== ""; }).length > 0) {
+      if (!confirm("Replace the current note with the imported file?")) return;
+    }
+    setNote(text.split(/\r?\n/));
+    localStorage.setItem(LS_NOTE, JSON.stringify(getLines()));
+  };
+  reader.readAsText(file);
+  e.target.value = "";
+});
+document.getElementById("copyBtn").addEventListener("click", function () {
+  var btn = document.getElementById("copyBtn");
+  navigator.clipboard.writeText(noteWithResults()).then(function () {
+    var old = btn.textContent;
+    btn.textContent = "Copied!";
+    setTimeout(function () { btn.textContent = old; }, 1500);
+  });
+});
+document.getElementById("clearBtn").addEventListener("click", function () {
+  if (!confirm("Clear the whole note? Export first if you want to keep it.")) return;
+  setNote([""]);
+  localStorage.setItem(LS_NOTE, JSON.stringify(getLines()));
+});
+
+/* ---------- Start ---------- */
+applySettings();
+loadNote();
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", function () {
+    navigator.serviceWorker.register("./sw.js").catch(function () {});
+  });
+}
+</script>
+</body>
+</html>
